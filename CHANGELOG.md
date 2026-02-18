@@ -18,6 +18,8 @@
 - Moderation: ban flow soft-deletes owned skills (reversible) and removes them from vector search (#298) (thanks @autogame-17).
 
 ### Fixed
+- Admin API: `POST /api/v1/users/reclaim` now performs non-destructive root-slug owner transfer
+  (preserves existing skill versions/stats/metadata) and clears active slug reservations.
 - Users: sync handle on ensure when GitHub login changes (#293) (thanks @christianhpoe).
 - Users/Auth: throttle GitHub profile sync on login; also sync avatar when it changes (#312) (thanks @ianalloway).
 - Upload gate: fetch GitHub account age by immutable account ID (prevents username swaps) (#116) (thanks @mkrokosz).

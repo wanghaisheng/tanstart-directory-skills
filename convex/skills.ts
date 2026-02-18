@@ -38,6 +38,7 @@ import { scheduleNextBatchIfNeeded } from './lib/batching'
 import {
   enforceReservedSlugCooldownForNewSkill,
   getLatestActiveReservedSlug,
+  listActiveReservedSlugsForSlug,
   reserveSlugForHardDeleteFinalize,
   upsertReservedSlugForRightfulOwner,
 } from './lib/reservedSlugs'
@@ -3073,6 +3074,38 @@ export const changeOwner = mutation({
   },
 })
 
+async function transferSkillOwnershipAndEmbeddings(
+  ctx: MutationCtx,
+  params: {
+    skill: Doc<'skills'>
+    ownerUserId: Id<'users'>
+    now: number
+  },
+) {
+  if (params.skill.ownerUserId === params.ownerUserId) return
+
+  await ctx.db.patch(params.skill._id, {
+    ownerUserId: params.ownerUserId,
+    lastReviewedAt: params.now,
+    updatedAt: params.now,
+  })
+
+  const embeddings = await listSkillEmbeddingsForSkill(ctx, params.skill._id)
+  for (const embedding of embeddings) {
+    await ctx.db.patch(embedding._id, {
+      ownerId: params.ownerUserId,
+      updatedAt: params.now,
+    })
+  }
+}
+
+async function releaseActiveReservationsForSlug(ctx: MutationCtx, slug: string, releasedAt: number) {
+  const active = await listActiveReservedSlugsForSlug(ctx, slug)
+  for (const reservation of active) {
+    await ctx.db.patch(reservation._id, { releasedAt })
+  }
+}
+
 /**
  * Admin-only: reclaim a squatted slug by hard-deleting the squatter's skill
  * and reserving the slug for the rightful owner.
@@ -3151,6 +3184,7 @@ export const reclaimSlugInternal = internalMutation({
     slug: v.string(),
     rightfulOwnerUserId: v.id('users'),
     reason: v.optional(v.string()),
+    transferRootSlugOnly: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const actor = await ctx.db.get(args.actorUserId)
@@ -3161,11 +3195,81 @@ export const reclaimSlugInternal = internalMutation({
     if (!slug) throw new Error('Slug required')
 
     const now = Date.now()
+    const transferRootSlugOnly = args.transferRootSlugOnly === true
+
+    const rightfulOwner = await ctx.db.get(args.rightfulOwnerUserId)
+    if (!rightfulOwner || rightfulOwner.deletedAt || rightfulOwner.deactivatedAt) {
+      throw new Error('Rightful owner not found')
+    }
 
     const existingSkill = await ctx.db
       .query('skills')
       .withIndex('by_slug', (q) => q.eq('slug', slug))
       .unique()
+
+    if (transferRootSlugOnly) {
+      if (!existingSkill) {
+        await ctx.db.insert('auditLogs', {
+          actorUserId: args.actorUserId,
+          action: 'slug.reclaim',
+          targetType: 'slug',
+          targetId: slug,
+          metadata: {
+            slug,
+            rightfulOwnerUserId: args.rightfulOwnerUserId,
+            transferRootSlugOnly: true,
+            action: 'missing',
+            reason: args.reason || undefined,
+          },
+          createdAt: now,
+        })
+        return { ok: true as const, action: 'missing' as const }
+      }
+
+      if (existingSkill.ownerUserId === args.rightfulOwnerUserId) {
+        await releaseActiveReservationsForSlug(ctx, slug, now)
+        await ctx.db.insert('auditLogs', {
+          actorUserId: args.actorUserId,
+          action: 'slug.reclaim',
+          targetType: 'slug',
+          targetId: slug,
+          metadata: {
+            slug,
+            rightfulOwnerUserId: args.rightfulOwnerUserId,
+            transferRootSlugOnly: true,
+            action: 'already_owned',
+            reason: args.reason || undefined,
+          },
+          createdAt: now,
+        })
+        return { ok: true as const, action: 'already_owned' as const }
+      }
+
+      await transferSkillOwnershipAndEmbeddings(ctx, {
+        skill: existingSkill,
+        ownerUserId: args.rightfulOwnerUserId,
+        now,
+      })
+      await releaseActiveReservationsForSlug(ctx, slug, now)
+
+      await ctx.db.insert('auditLogs', {
+        actorUserId: args.actorUserId,
+        action: 'slug.reclaim',
+        targetType: 'slug',
+        targetId: slug,
+        metadata: {
+          slug,
+          rightfulOwnerUserId: args.rightfulOwnerUserId,
+          previousOwnerUserId: existingSkill.ownerUserId,
+          hadSquatter: true,
+          transferRootSlugOnly: true,
+          action: 'ownership_transferred',
+          reason: args.reason || undefined,
+        },
+        createdAt: now,
+      })
+      return { ok: true as const, action: 'ownership_transferred' as const }
+    }
 
     if (existingSkill && existingSkill.ownerUserId !== args.rightfulOwnerUserId) {
       await ctx.scheduler.runAfter(0, internal.skills.hardDeleteInternal, {
