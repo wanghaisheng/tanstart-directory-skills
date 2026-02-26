@@ -53,6 +53,7 @@
 - CLI tests: assert 5xx HTTP responses still perform retry attempts before surfacing final error (#457) (thanks @YonghaoZhao722).
 - GitHub import: improve storage/publish failure errors with actionable context; add regression tests for error formatting (#512) (thanks @vassiliylakhonin).
 - CLI: show manual URL guidance when automatic browser opening is unavailable; add regression tests for opener errors (#163) (thanks @aronchick).
+- API/CLI: expose skill security status in version inspect output, with schema wiring and CLI regression coverage (#362) (thanks @abutbul).
 
 ## 0.6.1 - 2026-02-13
 

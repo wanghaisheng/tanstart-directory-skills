@@ -27,6 +27,13 @@ type FileEntry = {
   contentType: string | null
 }
 
+type SecurityStatus = {
+  status: 'clean' | 'suspicious' | 'malicious' | 'pending' | 'error'
+  hasWarnings: boolean
+  checkedAt: number | null
+  model: string | null
+}
+
 export async function cmdInspect(opts: GlobalOpts, slug: string, options: InspectOptions = {}) {
   const trimmed = slug.trim()
   if (!trimmed) fail('Slug required')
@@ -130,6 +137,7 @@ export async function cmdInspect(opts: GlobalOpts, slug: string, options: Inspec
 
     if (shouldPrintMeta && versionResult?.version) {
       printVersionSummary(versionResult.version)
+      printSecuritySummary(versionResult.version)
     }
 
     if (versionsList?.items && Array.isArray(versionsList.items)) {
@@ -256,6 +264,50 @@ function formatVersionLine(item: unknown) {
   const changelog = typeof entry.changelog === 'string' ? entry.changelog : ''
   const snippet = changelog ? `  ${truncate(changelog, 80)}` : ''
   return `${version}  ${createdAt}${snippet}`
+}
+
+function printSecuritySummary(version: unknown) {
+  if (!version || typeof version !== 'object') return
+  const sec = normalizeSecurity((version as { security?: unknown }).security)
+  if (!sec) return
+  console.log(`Security: ${sec.status.toUpperCase()}`)
+  if (sec.hasWarnings) {
+    console.log('Warnings: yes')
+  }
+  if (typeof sec.checkedAt === 'number') {
+    console.log(`Checked: ${formatTimestamp(sec.checkedAt)}`)
+  }
+  if (sec.model) {
+    console.log(`Model: ${sec.model}`)
+  }
+}
+
+function normalizeSecurity(security: unknown): SecurityStatus | null {
+  if (!security || typeof security !== 'object') return null
+  const value = security as {
+    status?: unknown
+    hasWarnings?: unknown
+    checkedAt?: unknown
+    model?: unknown
+  }
+  if (
+    value.status !== 'clean' &&
+    value.status !== 'suspicious' &&
+    value.status !== 'malicious' &&
+    value.status !== 'pending' &&
+    value.status !== 'error'
+  ) {
+    return null
+  }
+  if (typeof value.hasWarnings !== 'boolean') return null
+  const checkedAt = typeof value.checkedAt === 'number' ? value.checkedAt : null
+  const model = typeof value.model === 'string' ? value.model : null
+  return {
+    status: value.status,
+    hasWarnings: value.hasWarnings,
+    checkedAt,
+    model,
+  }
 }
 
 function formatFileLine(file: FileEntry) {
