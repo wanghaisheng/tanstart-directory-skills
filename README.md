@@ -2,7 +2,7 @@
   <img src="public/clawd-logo.png" alt="ClawHub" width="120">
 </p>
 
-<h1 align="center">ClawHub</h1>
+<h1 align="center">OpenClawHub</h1>
 
 <p align="center">
   <a href="https://github.com/openclaw/clawhub/actions/workflows/ci.yml?branch=main"><img src="https://img.shields.io/github/actions/workflow/status/openclaw/clawhub/ci.yml?branch=main&style=for-the-badge" alt="CI status"></a>
